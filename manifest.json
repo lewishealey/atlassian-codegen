@@ -1,6 +1,6 @@
 {
-  "name": "Code Snippet Editor",
-  "id": "1311777988952403297",
+  "name": "Atlassian Codegen",
+  "id": "000000",
   "api": "1.0.0",
   "editorType": ["dev", "figma"],
   "capabilities": ["codegen"],

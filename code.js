@@ -140,6 +140,7 @@ function snippetsFromSnippetData(snippetData, isDetailsMode) {
   return snippets;
 }
 
+
 async function findAndGenerateSelectionSnippetData(currentNode, params, raw) {
   const data = [];
   const seenTemplates = {};
@@ -203,38 +204,89 @@ async function hydrateSnippets(pluginData, currentNode, params, raw) {
   const pluginDataArray = JSON.parse(pluginData);
   const codeArray = [];
 
-  pluginDataArray.forEach((pluginData) => {
-    const lines = pluginData.code.split("\n");
-    const code = [];
-    lines.forEach((line) => {
-      const [matches, qualifies] = lineQualifierMatch(line, params);
+  for (let pluginDataChild of pluginDataArray) {
+    let lines = pluginDataChild.code.split("\n");
+    let code = [];
+
+    for (let line of lines) {
+      let [matches, qualifies] = lineQualifierMatch(line, params);
       matches.forEach((match) => {
         line = line.replace(match[0], "");
       });
 
-      const symbolMatches = [
+      let symbolMatches = [
         ...line.matchAll(/\{\{([^\{\?\}\|]+)(\|([^\{\?\}]+))?\}\}/g),
       ];
+
       if (qualifies && symbolMatches.length) {
         let succeeded = true;
-        symbolMatches.forEach((symbolMatch) => {
-          const [match, param, _, filter] = symbolMatch.map((a) =>
+
+        for (let symbolMatch of symbolMatches) {
+          let [match, param, _, filter] = symbolMatch.map((a) =>
             a ? a.trim() : a
           );
-          if (param in params) {
-            const value = filterString(params[param], raw[param], filter);
-            line = line.replace(match, value);
-          } else {
+
+           if (param in params) {
+             const value = filterString(params[param], raw[param], filter);
+             line = line.replace(match, value, param);
+           } else {
+             succeeded = false;
+           }
+
+          // If the component needs to be rendered
+          if (param.includes(".c")) {
+            let renderNode = figma.getNodeById(raw[param]);
+            if(renderNode) {
+              let { params: childParams, raw: childRaw } = await paramsFromNode(
+                renderNode
+              );
+
+              let snippetData = await findAndGenerateSelectionSnippetData(
+                renderNode,
+                childParams,
+                childRaw
+              );
+
+              // Adjust the code accordingly based on snippetData
+              snippetData.forEach((snippet) => {
+                snippet.codeArray.forEach((codeRaw) => {
+                  code.push(codeRaw);
+                });
+              });
+              succeeded = false;
+            }
+          }
+          
+          if (param === "node.children") {
+            if (currentNode.children) {
+              for (let child of currentNode.children) {
+                let { params: childParams, raw: childRaw } =
+                  await paramsFromNode(child);
+                let snippetData = await findAndGenerateSelectionSnippetData(
+                  child,
+                  childParams,
+                  childRaw
+                );
+
+                // Adjust the code accordingly based on snippetData
+                snippetData.forEach(snippet => {
+                  snippet.codeArray.forEach(codeRaw => {
+                    code.push(codeRaw);
+                  })
+                });
+              }
+            }
             succeeded = false;
           }
-        });
+          }
+
         if (succeeded) {
           code.push(line);
         }
       } else if (qualifies) {
         code.push(line);
       }
-    });
+    }
 
     const codeString = code
       .join("\n")
@@ -243,7 +295,7 @@ async function hydrateSnippets(pluginData, currentNode, params, raw) {
       .replace(/\\\n/g, " "); // collapse single line
 
     codeArray.push(codeString);
-  });
+  }
 
   return { params, pluginDataArray, codeArray };
 }
@@ -328,6 +380,9 @@ async function paramsFromNode(node) {
           object[cleanName].INSTANCE_SWAP = foundNode
             ? foundNode.name || ""
             : "";
+          object[cleanName].COMPONENT = foundNode
+              ? foundNode.id || ""
+              : "";
         }
       } else {
         object[cleanName].BOOLEAN = value;
